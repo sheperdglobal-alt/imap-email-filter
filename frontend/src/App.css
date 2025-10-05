@@ -1,0 +1,392 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+}
+
+.App {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.App-header {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.App-header h1 {
+  color: #667eea;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.refresh-btn {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 0.3s;
+}
+
+.refresh-btn:hover {
+  background: #5568d3;
+}
+
+.loading {
+  text-align: center;
+  color: white;
+  font-size: 20px;
+  padding: 50px;
+}
+
+.error-banner {
+  background: #ff4444;
+  color: white;
+  padding: 15px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.container {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 20px;
+  height: calc(100vh - 180px);
+}
+
+.email-list {
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.email-list h2 {
+  color: #333;
+  margin-bottom: 15px;
+  font-size: 20px;
+}
+
+.email-list ul {
+  list-style: none;
+}
+
+.email-list li {
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.email-list li:hover {
+  transform: translateX(5px);
+}
+
+.email-list li.selected .email-item {
+  background: #667eea;
+  color: white;
+}
+
+.email-item {
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+  transition: all 0.3s;
+}
+
+.email-item:hover {
+  background: #e9ecef;
+}
+
+.email-from {
+  font-weight: 600;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.email-subject {
+  font-size: 14px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.email-amount {
+  background: #ffc107;
+  color: #333;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.email-details {
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  padding: 30px;
+  overflow-y: auto;
+}
+
+.email-details h2 {
+  color: #333;
+  margin-bottom: 20px;
+  font-size: 22px;
+}
+
+.detail-row {
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-row strong {
+  color: #667eea;
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.detail-row.highlight {
+  background: #fff3cd;
+  padding: 15px;
+  border-radius: 8px;
+  border: 2px solid #ffc107;
+}
+
+.email-preview {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 5px;
+  margin-top: 10px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 2px solid #e9ecef;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  flex: 1;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-approve {
+  background: #28a745;
+  color: white;
+}
+
+.btn-approve:hover {
+  background: #218838;
+}
+
+.btn-edit {
+  background: #17a2b8;
+  color: white;
+}
+
+.btn-edit:hover {
+  background: #138496;
+}
+
+.btn-delete {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-delete:hover {
+  background: #c82333;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #5568d3;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #5a6268;
+}
+
+.empty-state {
+  text-align: center;
+  color: #6c757d;
+  padding: 50px 20px;
+  font-size: 18px;
+}
+
+/* Base64 Editor Styles */
+.base64-editor {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 2px solid #e9ecef;
+}
+
+.base64-editor h3 {
+  color: #333;
+  margin-bottom: 15px;
+}
+
+.editor-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  color: #856404;
+  padding: 12px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+
+.content-editor {
+  width: 100%;
+  padding: 15px;
+  border: 2px solid #e9ecef;
+  border-radius: 5px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  margin-bottom: 15px;
+}
+
+.content-editor:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.base64-editor.error {
+  background: #f8d7da;
+  border: 1px solid #f5c6cb;
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.base64-editor.error h3 {
+  color: #721c24;
+}
+
+.base64-editor.error p {
+  color: #721c24;
+  margin: 10px 0;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #667eea;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5568d3;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .container {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .email-list {
+    max-height: 400px;
+  }
+
+  .email-details {
+    max-height: 600px;
+  }
+}
+
+@media (max-width: 768px) {
+  .App-header {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .App-header h1 {
+    font-size: 22px;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .email-meta {
+    flex-direction: column;
+    gap: 5px;
+  }
+}
