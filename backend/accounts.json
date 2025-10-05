@@ -1,0 +1,9 @@
+[
+  {
+    "email": "user@example.com",
+    "password": "password123",
+    "imap_host": "mail.privateemail.com",
+    "imap_port": 993,
+    "proxy": true
+  }
+]
