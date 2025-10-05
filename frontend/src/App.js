@@ -106,17 +106,15 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>📧 IMAP Email Filter - Quarantine Management</h1>
-        <button onClick={fetchQuarantinedEmails} className="refresh-btn">
+        <button className="refresh-btn" onClick={fetchQuarantinedEmails}>
           🔄 Refresh
         </button>
       </header>
-
       {error && (
         <div className="error-banner">
           ⚠️ Error: {error}
         </div>
       )}
-
       <div className="container">
         <div className="email-list">
           <h2>Quarantined Emails ({emails.length})</h2>
@@ -148,7 +146,6 @@ function App() {
             </ul>
           )}
         </div>
-
         <div className="email-details">
           {selectedEmail ? (
             <>
@@ -181,7 +178,6 @@ function App() {
                   </>
                 );
               })()}
-
               {editMode ? (
                 <Base64Editor
                   content={selectedEmail.content}
