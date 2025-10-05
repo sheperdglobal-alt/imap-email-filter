@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
 from email.message import EmailMessage
-
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -18,12 +17,12 @@ from threading import Thread
 
 # Configuration imports
 from config import (
-    IMAP_UPSTREAM_HOST,
-    IMAP_UPSTREAM_PORT,
-    IMAP_UPSTREAM_SSL,
-    IMAP_PROXY_LISTEN_HOST,
-    IMAP_PROXY_LISTEN_PORT,
-    IMAP_PROXY_LISTEN_SSL_PORT,
+    UPSTREAM_IMAP_HOST,
+    UPSTREAM_IMAP_PORT,
+    UPSTREAM_IMAP_SSL,
+    LISTEN_HOST,
+    UNSECURE_PORT,
+    SECURE_PORT,
     TLS_CERT_FILE,
     TLS_KEY_FILE,
     QUARANTINE_ENABLED,
@@ -36,24 +35,22 @@ logger = logging.getLogger("imap-proxy")
 # =========================
 # FastAPI app and models
 # =========================
+
 app = FastAPI(title="Email Quarantine Management API", version="1.0.0")
 
 # Persistent quarantine store (use database in production)
 # Structure: { id: { meta, content, status } }
 quarantine_store: Dict[str, Dict] = {}
 
-
 class EmailMeta(BaseModel):
     subject: str
     sender: str
     amount: float = 0.0
 
-
 class EmailContent(BaseModel):
     meta: EmailMeta
     content: str  # base64 encoded email bytes
     status: str = "held"  # held, approved, deleted, delivered
-
 
 class QuarantinedEmail(BaseModel):
     id: str
@@ -61,12 +58,10 @@ class QuarantinedEmail(BaseModel):
     content: str
     status: str
 
-
 # API Endpoints
 @app.get("/quarantine")
 async def list_quarantined_emails():
     return {eid: {**data, "id": eid} for eid, data in quarantine_store.items()}
-
 
 @app.get("/quarantine/{email_id}")
 async def get_quarantined_email(email_id: str):
@@ -75,14 +70,12 @@ async def get_quarantined_email(email_id: str):
     data = quarantine_store[email_id]
     return {"id": email_id, "meta": data["meta"], "content": data["content"], "status": data["status"]}
 
-
 @app.post("/quarantine/{email_id}/approve")
 async def approve_quarantined_email(email_id: str):
     if email_id not in quarantine_store:
         raise HTTPException(status_code=404, detail="Email not found")
     quarantine_store[email_id]["status"] = "approved"
     return {"id": email_id, **quarantine_store[email_id]}
-
 
 @app.post("/quarantine/{email_id}/delete")
 async def delete_quarantined_email(email_id: str):
@@ -91,17 +84,17 @@ async def delete_quarantined_email(email_id: str):
     quarantine_store[email_id]["status"] = "deleted"
     return {"id": email_id, **quarantine_store[email_id]}
 
-
 # =========================
 # Email filtering utilities
 # =========================
-amount_pattern = re.compile(r"(?i)(?:amount|total|sum|subtotal|grand total)\D{0,10}(\d+[\.,]\d{2,})")
 
+amount_pattern = re.compile(r"(?i)(?:amount|total|sum|subtotal|grand total)\D{0,10}(\d+[\.,]\d{2,})")
 
 def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
     subject = msg.get("Subject", "")
     sender = msg.get("From", "")
     body = ""
+    
     # Attempt to get textual content
     if msg.is_multipart():
         for part in msg.walk():
@@ -116,6 +109,7 @@ def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
             body = msg.get_content().strip()
         except Exception:
             body = ""
+    
     # search for amount
     amt = 0.0
     for text in (subject, body):
@@ -125,26 +119,25 @@ def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
                 amt = max(amt, float(num))
             except Exception:
                 continue
+    
     meta = EmailMeta(subject=subject, sender=sender, amount=amt)
     return meta, amt
-
 
 def should_quarantine(meta: EmailMeta) -> bool:
     if not QUARANTINE_ENABLED:
         return False
     return meta.amount >= float(FILTER_MIN_AMOUNT)
 
-
 @dataclass
 class ProxyConfig:
-    upstream_host: str = IMAP_UPSTREAM_HOST
-    upstream_port: int = IMAP_UPSTREAM_PORT
-    upstream_ssl: bool = IMAP_UPSTREAM_SSL
-
+    upstream_host: str = UPSTREAM_IMAP_HOST
+    upstream_port: int = UPSTREAM_IMAP_PORT
+    upstream_ssl: bool = UPSTREAM_IMAP_SSL
 
 # =========================
 # IMAP Proxy Session
 # =========================
+
 class ImapProxySession:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, config: ProxyConfig):
         self.client_reader = reader
@@ -187,11 +180,13 @@ class ImapProxySession:
         try:
             await self.connect_upstream()
             await self.relay_server_greeting()
+            
             # Main loop
             while self.alive:
                 line = await self.read_client_line()
                 if not line:
                     break
+                    
                 tag, cmd, rest = self.parse_command(line)
                 if cmd == b"APPEND":
                     await self.handle_append(tag, rest)
@@ -253,11 +248,14 @@ class ImapProxySession:
         # APPEND mailbox [flags] [date-time] literal
         args, literal = await self.read_literal(rest)
         raw_msg = literal
+        
         try:
             msg: EmailMessage = BytesParser(policy=policy.default).parsebytes(raw_msg)
         except Exception:
             msg = email.message_from_bytes(raw_msg, policy=policy.default)  # type: ignore
+        
         meta, amt = extract_meta_and_amount(msg)
+        
         if should_quarantine(meta):
             qid = str(uuid.uuid4())
             quarantine_store[qid] = {
@@ -290,17 +288,15 @@ class ImapProxySession:
         # Simple pass-through for FETCH. Could inject flags to indicate quarantine status if desired
         await self.forward_and_relay(b"%b FETCH %b\r\n" % (tag, rest))
 
-
 # =========================
 # Server startup (plain and TLS)
 # =========================
-import contextlib
 
+import contextlib
 
 async def imap_client_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     session = ImapProxySession(reader, writer, ProxyConfig())
     await session.handle()
-
 
 async def start_imap_server(host: str, port: int, ssl_ctx: Optional[ssl.SSLContext] = None):
     server = await asyncio.start_server(imap_client_handler, host=host, port=port, ssl=ssl_ctx)
@@ -308,12 +304,10 @@ async def start_imap_server(host: str, port: int, ssl_ctx: Optional[ssl.SSLConte
     logger.info("IMAP proxy listening on %s", sockets)
     return server
 
-
 def build_ssl_context(cert_file: str, key_file: str) -> ssl.SSLContext:
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     ctx.load_cert_chain(certfile=cert_file, keyfile=key_file)
     return ctx
-
 
 # =========================
 # FastAPI server runner
@@ -322,29 +316,26 @@ def build_ssl_context(cert_file: str, key_file: str) -> ssl.SSLContext:
 def run_fastapi():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
-
 async def main_async():
     servers = []
     # Plain server
-    servers.append(await start_imap_server(IMAP_PROXY_LISTEN_HOST, IMAP_PROXY_LISTEN_PORT, None))
+    servers.append(await start_imap_server(LISTEN_HOST, UNSECURE_PORT, None))
     # TLS server
     try:
         ssl_ctx = build_ssl_context(TLS_CERT_FILE, TLS_KEY_FILE)
-        servers.append(await start_imap_server(IMAP_PROXY_LISTEN_HOST, IMAP_PROXY_LISTEN_SSL_PORT, ssl_ctx))
+        servers.append(await start_imap_server(LISTEN_HOST, SECURE_PORT, ssl_ctx))
     except Exception as e:
         logger.warning("TLS server not started: %s", e)
-
     # Keep running
     await asyncio.gather(*(s.serve_forever() for s in servers))
-
 
 def run_imap_proxy_loop():
     asyncio.run(main_async())
 
-
 # =========================
 # Entrypoint combining FastAPI and IMAP proxy
 # =========================
+
 if __name__ == "__main__":
     # Run FastAPI in separate thread
     api_thread = Thread(target=run_fastapi, daemon=True)
