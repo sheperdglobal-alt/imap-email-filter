@@ -12,9 +12,9 @@ from email.parser import BytesParser
 from email.message import EmailMessage
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from threading import Thread
-
 # Configuration imports
 from config import (
     UPSTREAM_IMAP_HOST,
@@ -35,12 +35,23 @@ logger = logging.getLogger("imap-proxy")
 # =========================
 # FastAPI app and models
 # =========================
-
 app = FastAPI(title="Email Quarantine Management API", version="1.0.0")
+# Enable CORS for frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Persistent quarantine store (use database in production)
 # Structure: { id: { meta, content, status } }
 quarantine_store: Dict[str, Dict] = {}
+
+# In-memory accounts store (backed by accounts.json via accounts_api if needed)
+# Structure: { id: { email, password, imap_host, imap_port, use_tls, proxy_host, proxy_ports } }
+accounts_store: Dict[str, Dict] = {}
 
 class EmailMeta(BaseModel):
     subject: str
@@ -58,7 +69,21 @@ class QuarantinedEmail(BaseModel):
     content: str
     status: str
 
-# API Endpoints
+# ---- Multi-account models ----
+class AccountIn(BaseModel):
+    email: str
+    password: str
+    imap_host: str
+    imap_port: int = 993
+    use_tls: bool = True
+    proxy_host: str = "localhost"
+    proxy_unsecure_port: int = 1143
+    proxy_secure_port: int = 1993
+
+class Account(AccountIn):
+    id: str
+
+# API Endpoints (Quarantine)
 @app.get("/quarantine")
 async def list_quarantined_emails():
     return {eid: {**data, "id": eid} for eid, data in quarantine_store.items()}
@@ -85,16 +110,49 @@ async def delete_quarantined_email(email_id: str):
     return {"id": email_id, **quarantine_store[email_id]}
 
 # =========================
+# Multi-account REST Endpoints
+# =========================
+@app.get("/accounts", response_model=List[Account])
+async def list_accounts():
+    return [Account(id=aid, **adata) for aid, adata in accounts_store.items()]
+
+@app.post("/accounts", response_model=Account)
+async def create_account(account: AccountIn):
+    # prevent duplicates by email
+    for aid, adata in accounts_store.items():
+        if adata.get("email") == account.email:
+            raise HTTPException(status_code=409, detail="Account with this email already exists")
+    aid = str(uuid.uuid4())
+    accounts_store[aid] = account.model_dump()
+    logger.info("Created account %s for %s", aid, account.email)
+    return Account(id=aid, **accounts_store[aid])
+
+@app.put("/accounts/{account_id}", response_model=Account)
+async def update_account(account_id: str, account: AccountIn):
+    if account_id not in accounts_store:
+        raise HTTPException(status_code=404, detail="Account not found")
+    accounts_store[account_id] = account.model_dump()
+    logger.info("Updated account %s (%s)", account_id, account.email)
+    return Account(id=account_id, **accounts_store[account_id])
+
+@app.delete("/accounts/{account_id}")
+async def delete_account(account_id: str):
+    if account_id not in accounts_store:
+        raise HTTPException(status_code=404, detail="Account not found")
+    removed = accounts_store.pop(account_id)
+    logger.info("Deleted account %s (%s)", account_id, removed.get("email"))
+    return {"id": account_id, **removed}
+
+# =========================
 # Email filtering utilities
 # =========================
-
 amount_pattern = re.compile(r"(?i)(?:amount|total|sum|subtotal|grand total)\D{0,10}(\d+[\.,]\d{2,})")
 
 def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
     subject = msg.get("Subject", "")
     sender = msg.get("From", "")
     body = ""
-    
+
     # Attempt to get textual content
     if msg.is_multipart():
         for part in msg.walk():
@@ -109,7 +167,7 @@ def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
             body = msg.get_content().strip()
         except Exception:
             body = ""
-    
+
     # search for amount
     amt = 0.0
     for text in (subject, body):
@@ -119,7 +177,7 @@ def extract_meta_and_amount(msg: EmailMessage) -> Tuple[EmailMeta, float]:
                 amt = max(amt, float(num))
             except Exception:
                 continue
-    
+
     meta = EmailMeta(subject=subject, sender=sender, amount=amt)
     return meta, amt
 
@@ -137,7 +195,6 @@ class ProxyConfig:
 # =========================
 # IMAP Proxy Session
 # =========================
-
 class ImapProxySession:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, config: ProxyConfig):
         self.client_reader = reader
@@ -180,13 +237,13 @@ class ImapProxySession:
         try:
             await self.connect_upstream()
             await self.relay_server_greeting()
-            
+
             # Main loop
             while self.alive:
                 line = await self.read_client_line()
                 if not line:
                     break
-                    
+
                 tag, cmd, rest = self.parse_command(line)
                 if cmd == b"APPEND":
                     await self.handle_append(tag, rest)
@@ -200,6 +257,7 @@ class ImapProxySession:
         except Exception as e:
             logger.exception("Session error: %s", e)
         finally:
+            import contextlib
             with contextlib.suppress(Exception):
                 if self.server_writer:
                     self.server_writer.close()
@@ -209,7 +267,7 @@ class ImapProxySession:
                 await self.client_writer.wait_closed()
 
     def parse_command(self, line: bytes) -> Tuple[bytes, bytes, bytes]:
-        # IMAP: <tag> <command> [args]\r\n
+        # IMAP:  <command> [args]\r\n
         parts = line.strip().split(b" ", 2)
         if len(parts) == 0:
             return b"", b"", b""
@@ -248,14 +306,14 @@ class ImapProxySession:
         # APPEND mailbox [flags] [date-time] literal
         args, literal = await self.read_literal(rest)
         raw_msg = literal
-        
+
         try:
             msg: EmailMessage = BytesParser(policy=policy.default).parsebytes(raw_msg)
         except Exception:
             msg = email.message_from_bytes(raw_msg, policy=policy.default)  # type: ignore
-        
+
         meta, amt = extract_meta_and_amount(msg)
-        
+
         if should_quarantine(meta):
             qid = str(uuid.uuid4())
             quarantine_store[qid] = {
@@ -291,7 +349,6 @@ class ImapProxySession:
 # =========================
 # Server startup (plain and TLS)
 # =========================
-
 import contextlib
 
 async def imap_client_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -335,7 +392,6 @@ def run_imap_proxy_loop():
 # =========================
 # Entrypoint combining FastAPI and IMAP proxy
 # =========================
-
 if __name__ == "__main__":
     # Run FastAPI in separate thread
     api_thread = Thread(target=run_fastapi, daemon=True)
